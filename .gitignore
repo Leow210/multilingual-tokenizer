@@ -14,10 +14,10 @@ __pycache__/
 # Downloaded data. Re-downloadable, potentially gigabytes, and FLORES is a
 # gated dataset whose terms generally prohibit redistribution, so it must not
 # be pushed to a shared repo.
-data/
+/data/
 
 # Model checkpoints
-checkpoints/
+/checkpoints/
 *.safetensors
 *.bin
 
@@ -26,7 +26,7 @@ checkpoints/
 
 # Held back for now. Stays on local disk; remove this line when the team wants
 # a README in the repo.
-README.md
+/README.md
 
 # results/ IS committed on purpose: the survey parquet and the figures are
 # small, and committing them means anyone can redraw a plot or check a number
