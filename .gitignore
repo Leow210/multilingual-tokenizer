@@ -24,6 +24,10 @@ checkpoints/
 # macOS
 .DS_Store
 
+# Held back for now. Stays on local disk; remove this line when the team wants
+# a README in the repo.
+README.md
+
 # results/ IS committed on purpose: the survey parquet and the figures are
 # small, and committing them means anyone can redraw a plot or check a number
 # in the report without re-running the survey. Only oversized artifacts are
