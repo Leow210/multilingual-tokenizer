@@ -1,0 +1,32 @@
+# Virtual environments: thousands of platform-specific files, useless to others.
+.venv/
+venv/
+.env
+
+# Byte-compiled
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Downloaded data. Re-downloadable, potentially gigabytes, and FLORES is a
+# gated dataset whose terms generally prohibit redistribution, so it must not
+# be pushed to a shared repo.
+data/
+
+# Model checkpoints
+checkpoints/
+*.safetensors
+*.bin
+
+# macOS
+.DS_Store
+
+# results/ IS committed on purpose: the survey parquet and the figures are
+# small, and committing them means anyone can redraw a plot or check a number
+# in the report without re-running the survey. Only oversized artifacts are
+# excluded.
+results/**/*.pt
+results/**/*.ckpt

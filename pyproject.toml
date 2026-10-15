@@ -1,0 +1,48 @@
+[project]
+name = "tokpremium"
+version = "0.1.0"
+description = "Measuring and repairing tokenization premiums across languages"
+requires-python = ">=3.10"
+
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.2",
+    "pyarrow>=15.0",
+    "pyyaml>=6.0",
+    "datasets>=2.19",
+    "transformers>=4.44",
+    "matplotlib>=3.8",
+]
+
+[project.optional-dependencies]
+# The training half, added later. Kept separate so the survey runs without torch.
+train = [
+    "torch>=2.3",
+    "accelerate>=0.30",
+    "tokenizers>=0.19",
+    "sentencepiece>=0.2",
+    "sacrebleu>=2.4",
+]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.5",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --doctest-modules --ignore=check.py"
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

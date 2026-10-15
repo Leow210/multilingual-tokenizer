@@ -1,0 +1,76 @@
+# Survey configuration: which languages, which tokenizers.
+#
+# 16 languages: the team's original 12, plus English as the measurement pivot
+# and three high-resource European languages as a reference floor.
+#
+# `tier` and `script_family` are annotations for grouping in plots. They do not
+# affect measurement.
+
+split: devtest          # 1012 sentences; keep `dev` clean for any later tuning
+cache_dir: data/flores
+pivot_lang: eng_Latn
+
+languages:
+  # --- pivot ---------------------------------------------------------------
+  # Not optional. The headline metric is tokens relative to English for the
+  # same sentence, so without English that number does not exist.
+  - {code: eng_Latn, name: English,     tier: high, script_family: latin}
+
+  # --- reference floor -----------------------------------------------------
+  # Control group. Without languages that land near 1.5x, a 7x result cannot
+  # be read as "bad at Telugu" rather than "bad at everything but English".
+  - {code: spa_Latn, name: Spanish,     tier: high, script_family: latin}
+  - {code: fra_Latn, name: French,      tier: high, script_family: latin}
+  - {code: deu_Latn, name: German,      tier: high, script_family: latin}
+
+  # --- the team's 12 -------------------------------------------------------
+  # FLORES+ dropped the macrolanguage code 'zho' in favour of 'cmn' (Mandarin).
+  # Chinese doubles as evidence that non-Latin script is not inherently
+  # expensive: it comes in at 0.96 under Qwen, cheaper than English. It also
+  # writes without spaces between words, which is why tokens-per-word is not a
+  # usable metric and we report bytes-per-token instead.
+  - {code: cmn_Hans, name: Chinese,     tier: high, script_family: han}
+  - {code: hin_Deva, name: Hindi,       tier: mid,  script_family: brahmic}
+  - {code: ben_Beng, name: Bengali,     tier: mid,  script_family: brahmic}
+  - {code: tam_Taml, name: Tamil,       tier: mid,  script_family: brahmic}
+  - {code: tel_Telu, name: Telugu,      tier: mid,  script_family: brahmic}
+  - {code: urd_Arab, name: Urdu,        tier: mid,  script_family: arabic}
+  - {code: vie_Latn, name: Vietnamese,  tier: mid,  script_family: latin}
+
+  # Hebrew and Yiddish share a script but sit far apart (1.47 vs 2.77 under
+  # Qwen), which isolates corpus size from script coverage inside one writing
+  # system. Hebrew also covers the "non-Latin but well served" case.
+  - {code: heb_Hebr, name: Hebrew,      tier: mid,  script_family: hebrew}
+  - {code: ydd_Hebr, name: Yiddish,     tier: low,  script_family: hebrew}
+
+  # Armenian is the cleanest "poor merges" case in the set: 5.25x premium with
+  # a character-fragment rate of 0.002, meaning its characters ARE in the
+  # vocabulary and the merges are simply bad. Urdu is the same shape at 3.19x.
+  # These are the contrast partners for the script-uncovered languages above.
+  - {code: hye_Armn, name: Armenian,    tier: low,  script_family: armenian}
+
+  - {code: amh_Ethi, name: Amharic,     tier: low,  script_family: ethiopic}
+
+  # Shan tops every tokenizer's chart (10.5x under Qwen, 14.8 under Llama) and
+  # has almost no monolingual text. Excellent survey row, not a viable target.
+  - {code: shn_Mymr, name: Shan,        tier: low,  script_family: brahmic}
+
+# Three tokenizers, so the finding is about tokenizers in general rather than
+# one vendor's choice.
+#
+# Qwen is the one that decides the target language, because Qwen is the model
+# we extend. The others tell the story; they do not make the decision.
+#
+# All three are byte-level BPE in the 128k-200k range, so the variation between
+# them reflects which languages each vendor chose to spend vocabulary on rather
+# than how much vocabulary they bought. Note this in the report: we are not
+# testing the effect of vocabulary size, because we no longer vary it much.
+#
+# A SentencePiece tokenizer was dropped from this set (mistralai/Mistral-7B-v0.1,
+# 32k vocab). Re-adding it restores the family comparison, the 32k-200k size
+# range, and the byte-fallback metric, which is SentencePiece-specific and
+# therefore reads zero everywhere without it.
+tokenizers:
+  - {tokenizer_id: Qwen/Qwen3-0.6B,           label: qwen3-0.6b}   # ~152k, byte BPE
+  - {tokenizer_id: meta-llama/Llama-3.2-1B,   label: llama-3.2-1b} # 128k, byte BPE
+  - {tokenizer_id: Xenova/gpt-4o,             label: gpt-4o}       # ~200k, byte BPE
