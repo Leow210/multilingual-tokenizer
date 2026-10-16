@@ -18,10 +18,17 @@ def load_tokenizer(tokenizer_id: str):
 
     Cached because the survey loops languages inside tokenizers, and reloading
     per language turns a two-minute job into a twenty-minute one.
-    """
-    from transformers import AutoTokenizer
 
-    return AutoTokenizer.from_pretrained(tokenizer_id)
+    Built straight from the repo's tokenizer.json rather than via AutoTokenizer.
+    In transformers 5.x, AutoTokenizer lets the class named in
+    tokenizer_config.json rebuild the pre-tokenizer from its own defaults.
+    Xenova/gpt-4o names GPT2Tokenizer, so it got GPT-2's regex, which splits
+    combining marks off their base letters and roughly doubled GPT-4o's token
+    count for Indic scripts while Latin-script numbers still looked fine.
+    """
+    from transformers import PreTrainedTokenizerFast
+
+    return PreTrainedTokenizerFast.from_pretrained(tokenizer_id)
 
 
 # How each family marks a leading space in its surface pieces. This is the
