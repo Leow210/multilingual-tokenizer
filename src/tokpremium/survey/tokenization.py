@@ -7,15 +7,9 @@ modules whose numbers end up in the report.
 
 from __future__ import annotations
 
-import warnings
 from functools import lru_cache
 
 from .metrics import REPLACEMENT_CHAR
-
-# Exercises the places a mis-built tokenizer parts ways with its tokenizer.json:
-# combining marks in several Indic and Southeast Asian scripts, contractions,
-# digit runs, and newlines.
-_PROBE = "Hello world, it's 2024.\n  हिन्दी தமிழ் ভাষা తెలుగు မြန်မာ 中文"
 
 
 @lru_cache(maxsize=8)
@@ -25,43 +19,16 @@ def load_tokenizer(tokenizer_id: str):
     Cached because the survey loops languages inside tokenizers, and reloading
     per language turns a two-minute job into a twenty-minute one.
 
-    transformers 5.x rebuilds some tokenizers from their class defaults instead
-    of the repo's tokenizer.json. For Xenova/gpt-4o that replaces GPT-4o's
-    pre-tokenizer regex with GPT-2's, which splits combining marks off their
-    base letters and roughly doubles the token count for Indic scripts while
-    every Latin-script number still looks fine. So the loaded tokenizer is
-    checked against the repo's own tokenizer.json on a probe string, and the
-    file wins when they disagree.
+    Built straight from the repo's tokenizer.json rather than via AutoTokenizer.
+    In transformers 5.x, AutoTokenizer lets the class named in
+    tokenizer_config.json rebuild the pre-tokenizer from its own defaults.
+    Xenova/gpt-4o names GPT2Tokenizer, so it got GPT-2's regex, which splits
+    combining marks off their base letters and roughly doubled GPT-4o's token
+    count for Indic scripts while Latin-script numbers still looked fine.
     """
-    from transformers import AutoTokenizer
-
-    tok = AutoTokenizer.from_pretrained(tokenizer_id)
-    path = _tokenizer_json(tokenizer_id)
-    if path is None:
-        return tok
-
-    from tokenizers import Tokenizer
     from transformers import PreTrainedTokenizerFast
 
-    expected = Tokenizer.from_file(path).encode(_PROBE, add_special_tokens=False).ids
-    if tok(_PROBE, add_special_tokens=False)["input_ids"] != expected:
-        warnings.warn(
-            f"{tokenizer_id}: {type(tok).__name__} disagrees with the repo's tokenizer.json; "
-            "loading tokenizer.json directly",
-            stacklevel=2,
-        )
-        return PreTrainedTokenizerFast(tokenizer_file=path)
-    return tok
-
-
-def _tokenizer_json(tokenizer_id: str) -> str | None:
-    """Local path to the repo's tokenizer.json, or None if it ships without one."""
-    from huggingface_hub import hf_hub_download
-
-    try:
-        return hf_hub_download(tokenizer_id, "tokenizer.json")
-    except Exception:
-        return None
+    return PreTrainedTokenizerFast.from_pretrained(tokenizer_id)
 
 
 # How each family marks a leading space in its surface pieces. This is the
