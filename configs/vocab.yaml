@@ -1,0 +1,48 @@
+# Planned knobs for Telugu vocabulary extension. Not consumed by code yet.
+# Process: .contexts/vocabExtension-plan.md
+
+base:
+  model_id: Qwen/Qwen3-0.6B
+  tokenizer_id: Qwen/Qwen3-0.6B
+  # Confirmed byte-level BPE in check.py. If FAMILY is not byte_bpe, stop.
+
+target:
+  lang: tel_Telu
+  name: Telugu
+  failure_mode: script-uncovered
+  backup_lang: hye_Armn   # poor-merges; same pipeline, later
+
+# How many new merges to append. Sweep these; do not start at 8k.
+n_new_tokens: [1024, 2048, 4096]
+
+# Append-only: existing token ids stay put. Special tokens stay put.
+id_policy: append
+
+corpus:
+  # Prefer audited news first; FineWeb-2 is the volume fallback.
+  primary: indiccorp_v2_te
+  fallback: HuggingFaceFW/fineweb-2
+  fallback_config: tel_Telu
+  # Mix a little English so new merges are not bought by wrecking English fertility.
+  english_mix: 0.10
+  # FLORES `dev` is reserved for any later tuning. Never train merges on `devtest`.
+  holdout: flores_devtest
+
+init:
+  new_rows: mean_of_source_pieces
+  copy_old_rows: true
+
+# Course-scale stand-in for Liquid AI's 600B / 400B recipe.
+# Stage 1 trains only NEW embedding/lm-head rows. Stage 2 unfreezes.
+adapt:
+  stage1:
+    trainable: new_rows_only
+    data: telugu_heavy
+  stage2:
+    trainable: all
+    data: telugu_plus_english   # not English-only; see negative findings
+
+eval:
+  premium_split: flores_devtest
+  controls: [eng_Latn, cmn_Hans]
+  metrics: [premium_median, subchar_rate, bytes_per_token, bits_per_byte, net_cost_ratio]
