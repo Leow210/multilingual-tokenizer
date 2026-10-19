@@ -32,18 +32,45 @@ def mean_init_rows(weight: torch.Tensor, decomp: dict[int, list[int]], old_rows:
             weight[new_id] = rows.mean(dim=0).to(weight.dtype)
 
 
+def load_decomposition(
+    merges_json: str | Path, n: int
+) -> tuple[dict[int, list[int]], list[tuple[str, str]]]:
+    """First `n` merges from continue_bpe's merges.json: {new id: source ids}, merges.
+
+    Merges are greedy, so the first n entries are exactly the n-token extension.
+    """
+    entries = json.loads(Path(merges_json).read_text(encoding="utf-8"))["new_tokens"][:n]
+    if len(entries) < n:
+        raise ValueError(f"{merges_json} has only {len(entries)} merges, asked for {n}")
+    return (
+        {e["id"]: e["source_ids"] for e in entries},
+        [tuple(e["merge"]) for e in entries],
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--model", default="Qwen/Qwen3-0.6B")
-    ap.add_argument("--vocab-dir", required=True, help="results/vocab/<lang>/<n>")
+    ap.add_argument("--lang", required=True, help="e.g. hye_Armn")
+    ap.add_argument("--pretokenizer", default="shipped", help="as in configs/vocab.yaml")
+    ap.add_argument("--n", type=int, required=True, help="number of new tokens (a sweep size)")
+    ap.add_argument("--results-dir", default="results/vocab")
     ap.add_argument("--out", required=True, help="checkpoint dir (gitignored)")
     args = ap.parse_args(argv)
 
-    from transformers import AutoModelForCausalLM, PreTrainedTokenizerFast
+    from transformers import AutoModelForCausalLM
 
-    vdir = Path(args.vocab_dir)
-    decomp = {int(k): v for k, v in json.loads((vdir / "decomposition.json").read_text()).items()}
-    tok = PreTrainedTokenizerFast.from_pretrained(vdir)
+    from . import continue_bpe
+
+    merges_json = continue_bpe.merges_path(args.results_dir, args.lang, args.pretokenizer)
+    decomp, merges = load_decomposition(merges_json, args.n)
+    out = Path(args.out)
+    continue_bpe.build_tokenizer(
+        continue_bpe.load_base_spec(args.model), args.pretokenizer, args.lang, merges, out
+    )
+    from transformers import PreTrainedTokenizerFast
+
+    tok = PreTrainedTokenizerFast.from_pretrained(out)
 
     model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=torch.bfloat16)
     old_rows = model.get_input_embeddings().weight.shape[0]
@@ -59,7 +86,6 @@ def main(argv: list[str] | None = None) -> int:
     if not tied:
         mean_init_rows(model.get_output_embeddings().weight, decomp, old_rows=first_new)
 
-    out = Path(args.out)
     model.save_pretrained(out)
     tok.save_pretrained(out)
     print(f"saved {out}: rows {old_rows} -> {inp.shape[0]}, tied={tied}, "
