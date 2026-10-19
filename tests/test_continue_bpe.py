@@ -18,8 +18,10 @@ from tokpremium.vocab.continue_bpe import (
     extend,
     is_ascii_piece,
     keep_marks,
+    keep_marks_target,
     learn_merges,
     piece_bytes,
+    script_marks,
     segment,
 )
 from tokpremium.vocab.decompose import decomposer
@@ -151,6 +153,34 @@ def test_keep_marks_keeps_a_telugu_word_whole(base):
     # Text without marks pre-tokenizes the same either way.
     for text in ENGLISH:
         assert shipped.pre_tokenize_str(text) == marked.pre_tokenize_str(text)
+
+
+def chunks(spec, text):
+    return [c for c, _ in Tokenizer.from_str(json.dumps(spec)).pre_tokenizer.pre_tokenize_str(text)]
+
+
+def test_keep_marks_target_only_touches_the_target_script(base):
+    telugu = keep_marks_target(base, "tel_Telu")
+    assert len(chunks(telugu, "తెలుగు")) == 1
+    # Other scripts with combining marks are cut exactly as shipped Qwen cuts them.
+    for text in ["हिन्दी", "ขณะนี้", "தமிழ்நாடு", "مَرْحَبًا", *ENGLISH]:
+        assert chunks(telugu, text) == chunks(base, text)
+
+
+def test_keep_marks_target_is_a_no_op_for_a_script_without_marks(base):
+    assert script_marks("Armn") == ""
+    assert keep_marks_target(base, "hye_Armn") == base
+
+
+def test_script_marks_lists_only_combining_marks():
+    cls = script_marks("Telu")
+    assert r"\x{0C3E}" in cls  # vowel sign AA
+    assert "0C15" not in cls  # KA is a letter
+
+
+def test_unknown_script_is_an_error(base):
+    with pytest.raises(ValueError, match="SCRIPT_BLOCKS"):
+        keep_marks_target(base, "xyz_Zzzz")
 
 
 def test_subchar_mask_covers_ids_past_the_special_tokens(base, tmp_path):
