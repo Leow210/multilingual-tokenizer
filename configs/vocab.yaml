@@ -1,5 +1,10 @@
-# Planned knobs for Telugu vocabulary extension. Not consumed by code yet.
+# Telugu vocabulary extension (plan step B), with Armenian as the poor-merges partner.
 # Process: .contexts/vocabExtension-plan.md
+#
+#   python -m tokpremium.vocab.continue_bpe --config configs/vocab.yaml   # learn merges
+#   python -m tokpremium.vocab.measure      --config configs/vocab.yaml   # score them
+#
+# init: and adapt: below are steps C and D; nothing reads them yet.
 
 base:
   model_id: Qwen/Qwen3-0.6B
@@ -10,23 +15,42 @@ target:
   lang: tel_Telu
   name: Telugu
   failure_mode: script-uncovered
-  backup_lang: hye_Armn   # poor-merges; same pipeline, later
+  backup_lang: hye_Armn   # poor-merges; same pipeline
+
+# Languages continue_bpe and measure run, in order (--lang narrows it).
+languages: [tel_Telu, hye_Armn]
 
 # How many new merges to append. Sweep these; do not start at 8k.
+# Merges are learned once up to the largest size; smaller sizes are its prefixes.
 n_new_tokens: [1024, 2048, 4096]
 
 # Append-only: existing token ids stay put. Special tokens stay put.
 id_policy: append
 
+# shipped:    Qwen's split regex as-is (the plan's default).
+# keep_marks: the same regex with combining marks (\p{M}) allowed inside words,
+#             as GPT-4o's does. Qwen's \p{L}+ cuts Telugu/Tamil words at every
+#             vowel sign, which caps what any number of merges can achieve.
+pretokenizers: [shipped, keep_marks]
+
 corpus:
-  # Prefer audited news first; FineWeb-2 is the volume fallback.
-  primary: indiccorp_v2_te
-  fallback: HuggingFaceFW/fineweb-2
-  fallback_config: tel_Telu
-  # Mix a little English so new merges are not bought by wrecking English fertility.
-  english_mix: 0.10
+  # Characters streamed per language. Plenty to rank the first 4k pairs.
+  max_chars: 50_000_000
+  cache_dir: data/vocab/corpus   # gitignored
+  sources:
+    # Audited news first (IndicCorp v2), as planned.
+    tel_Telu: {repo: ai4bharat/IndicCorpV2, data_files: data/te.txt}
+    # No IndicCorp for Armenian; FineWeb-2 is the planned fallback.
+    hye_Armn: {repo: HuggingFaceFW/fineweb-2, config: hye_Armn}
+  # Merges whose result is pure ASCII are refused instead of mixing in English:
+  # it guarantees English tokenizes exactly as before, which a 10% English mix
+  # does not (English pairs would compete for the new budget).
   # FLORES `dev` is reserved for any later tuning. Never train merges on `devtest`.
   holdout: flores_devtest
+
+output:
+  results_dir: results/vocab               # merges.json + summary.csv (committed)
+  tokenizer_dir: data/vocab/tokenizers     # rebuilt tokenizer folders, ~11 MB each (gitignored)
 
 init:
   new_rows: mean_of_source_pieces
@@ -44,5 +68,6 @@ adapt:
 
 eval:
   premium_split: flores_devtest
+  pivot: eng_Latn
   controls: [eng_Latn, cmn_Hans]
   metrics: [premium_median, subchar_rate, bytes_per_token, bits_per_byte, net_cost_ratio]
