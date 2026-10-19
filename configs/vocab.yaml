@@ -27,11 +27,17 @@ n_new_tokens: [1024, 2048, 4096]
 # Append-only: existing token ids stay put. Special tokens stay put.
 id_policy: append
 
-# shipped:    Qwen's split regex as-is (the plan's default).
-# keep_marks: the same regex with combining marks (\p{M}) allowed inside words,
-#             as GPT-4o's does. Qwen's \p{L}+ cuts Telugu/Tamil words at every
-#             vowel sign, which caps what any number of merges can achieve.
-pretokenizers: [shipped, keep_marks]
+# Qwen's \p{L}+ cuts Telugu/Tamil words at every vowel sign (a combining mark),
+# which caps what any number of merges can achieve.
+# shipped:           Qwen's split regex as-is (the plan's default).
+# keep_marks_target: marks of the target's own script kept inside words; every
+#                    other script tokenizes exactly as shipped.
+# keep_marks:        every combining mark kept inside words, as GPT-4o's regex
+#                    does. Also re-tokenizes Thai, Arabic, Hindi, Bengali ... with
+#                    no new merges at all; for comparison, not for training.
+# Steps C and D carry shipped and keep_marks_target.
+# Side effects on all FLORES+ languages: python -m tokpremium.vocab.side_effects
+pretokenizers: [shipped, keep_marks_target, keep_marks]
 
 corpus:
   # Characters streamed per language. Plenty to rank the first 4k pairs.

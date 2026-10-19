@@ -15,16 +15,24 @@ merges produced. So text the new merges do not touch tokenizes exactly as
 before. Merges whose result is pure ASCII are refused outright, which pins
 English down even when the training corpus carries English.
 
-Two pre-tokenizers are supported:
+Three pre-tokenizers are supported:
 
-  shipped     Qwen's regex, unchanged.
-  keep_marks  The same regex with combining marks (\p{M}) allowed inside a
-              letter run, as GPT-4o's o200k regex does. Qwen's letter class is
-              \p{L}+, which excludes the vowel signs and viramas Brahmic
-              scripts are written with, so a Tamil or Telugu word is cut into
-              several chunks before BPE ever runs and no merge can span a vowel
-              sign. Continuation under `shipped` therefore plateaus on those
-              scripts however many tokens it adds.
+  shipped            Qwen's regex, unchanged.
+  keep_marks_target  Combining marks of the target language's own script are
+                     allowed inside a letter run. Qwen's letter class is \p{L}+,
+                     which excludes the vowel signs and viramas Brahmic scripts
+                     are written with, so a Tamil or Telugu word is cut into
+                     several chunks before BPE ever runs and no merge can span
+                     a vowel sign. Continuation under `shipped` therefore
+                     plateaus on those scripts however many tokens it adds.
+                     Scoped to one Unicode block, every other script tokenizes
+                     exactly as shipped (see side_effects.py).
+  keep_marks         Every combining mark (\p{M}) allowed inside a letter run,
+                     as GPT-4o's o200k regex does. Reported for comparison
+                     only: with no new merges at all it already changes how
+                     Qwen tokenizes 39 FLORES+ languages, Thai (-43% tokens)
+                     and Arabic among them, because Qwen's vocabulary holds
+                     whole-word tokens its own regex can never reach.
 
 Output per (language, pre-tokenizer): results/vocab/<lang>/<pretokenizer>/merges.json,
 holding the ordered new merges up to the largest size in the sweep. Merges are
@@ -40,6 +48,7 @@ import copy
 import heapq
 import json
 import sys
+import unicodedata
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable
 from pathlib import Path
@@ -48,11 +57,25 @@ import yaml
 
 from . import corpus, decompose
 
-# Qwen's letter-run alternatives, and the same with combining marks allowed inside a run.
+# Qwen's letter-run alternatives, and their replacements with `{marks}` (a regex
+# character-class body) allowed inside a run and kept out of the punctuation run.
 MARKS_PATCH = [
-    (r"[^\r\n\p{L}\p{N}]?\p{L}+", r"[^\r\n\p{L}\p{M}\p{N}]?[\p{L}\p{M}]+"),
-    (r" ?[^\s\p{L}\p{N}]+", r" ?[^\s\p{L}\p{M}\p{N}]+"),
+    (r"[^\r\n\p{L}\p{N}]?\p{L}+", r"[^\r\n\p{L}{marks}\p{N}]?[\p{L}{marks}]+"),
+    (r" ?[^\s\p{L}\p{N}]+", r" ?[^\s\p{L}{marks}\p{N}]+"),
 ]
+
+# Unicode block per ISO 15924 script code, for scoping keep_marks_target. A
+# block is per script, not per language: Telugu's marks also serve any other
+# language written in Telugu script.
+SCRIPT_BLOCKS = {
+    "Armn": (0x0530, 0x058F), "Hebr": (0x0590, 0x05FF), "Arab": (0x0600, 0x06FF),
+    "Deva": (0x0900, 0x097F), "Beng": (0x0980, 0x09FF), "Guru": (0x0A00, 0x0A7F),
+    "Gujr": (0x0A80, 0x0AFF), "Orya": (0x0B00, 0x0B7F), "Taml": (0x0B80, 0x0BFF),
+    "Telu": (0x0C00, 0x0C7F), "Knda": (0x0C80, 0x0CFF), "Mlym": (0x0D00, 0x0D7F),
+    "Sinh": (0x0D80, 0x0DFF), "Thai": (0x0E00, 0x0E7F), "Laoo": (0x0E80, 0x0EFF),
+    "Tibt": (0x0F00, 0x0FFF), "Mymr": (0x1000, 0x109F), "Ethi": (0x1200, 0x137F),
+    "Khmr": (0x1780, 0x17FF), "Olck": (0x1C50, 0x1C7F),
+}
 
 
 def _byte_decoder() -> dict[str, int]:
@@ -84,23 +107,57 @@ def is_ascii_piece(piece: str) -> bool:
     return all(b < 128 for b in piece_bytes(piece))
 
 
-def keep_marks(spec: dict) -> dict:
-    """Copy of a tokenizer spec whose split regex keeps combining marks inside words."""
+def keep_marks(spec: dict, marks: str = r"\p{M}") -> dict:
+    """Copy of a tokenizer spec whose split regex keeps `marks` inside words.
+
+    `marks` is a regex character-class body; the default is every combining
+    mark. An empty class leaves the spec exactly as it was.
+    """
     spec = copy.deepcopy(spec)
+    if not marks:
+        return spec
     pre = spec["pre_tokenizer"]
     split = next(p for p in pre.get("pretokenizers", [pre]) if p["type"] == "Split")
     regex = split["pattern"]["Regex"]
     for old, new in MARKS_PATCH:
         if regex.count(old) != 1:
             raise ValueError(f"split regex does not have the expected shape; missing {old!r}")
-        regex = regex.replace(old, new)
+        regex = regex.replace(old, new.replace("{marks}", marks))
     split["pattern"]["Regex"] = regex
     return spec
 
 
-PRETOKENIZERS: dict[str, Callable[[dict], dict]] = {
-    "shipped": copy.deepcopy,
-    "keep_marks": keep_marks,
+def script_marks(script: str) -> str:
+    r"""Character-class body listing every combining mark in a script's Unicode block.
+
+    Listed code point by code point (as \x{....} ranges) rather than as an
+    intersection like [\p{M}&&...], so the class is explicit in the regex and
+    does not depend on the regex engine's set-operation support.
+    """
+    if script not in SCRIPT_BLOCKS:
+        raise ValueError(f"no Unicode block for script {script!r}; add it to SCRIPT_BLOCKS")
+    lo, hi = SCRIPT_BLOCKS[script]
+    ranges: list[list[int]] = []
+    for cp in range(lo, hi + 1):
+        if unicodedata.category(chr(cp)).startswith("M"):
+            if ranges and cp == ranges[-1][1] + 1:
+                ranges[-1][1] = cp
+            else:
+                ranges.append([cp, cp])
+    return "".join(rf"\x{{{a:04X}}}" if a == b else rf"\x{{{a:04X}}}-\x{{{b:04X}}}"
+                   for a, b in ranges)
+
+
+def keep_marks_target(spec: dict, lang: str) -> dict:
+    """keep_marks scoped to the combining marks of `lang`'s script (e.g. tel_Telu -> Telu)."""
+    return keep_marks(spec, script_marks(lang.split("_")[1]))
+
+
+# name -> (base spec, target language) -> spec with that pre-tokenizer.
+PRETOKENIZERS: dict[str, Callable[[dict, str], dict]] = {
+    "shipped": lambda spec, lang: copy.deepcopy(spec),
+    "keep_marks_target": keep_marks_target,
+    "keep_marks": lambda spec, lang: keep_marks(spec),
 }
 
 
@@ -237,11 +294,13 @@ def extend(spec: dict, merges: list[tuple[str, str]]) -> tuple[dict, list[int]]:
     return spec, new_ids
 
 
-def build_tokenizer(base_spec: dict, pretokenizer: str, merges: list[tuple[str, str]], out_dir):
+def build_tokenizer(
+    base_spec: dict, pretokenizer: str, lang: str, merges: list[tuple[str, str]], out_dir
+):
     """Write a loadable Hugging Face tokenizer folder for one point of the sweep."""
     from transformers import PreTrainedTokenizerFast
 
-    spec, _ = extend(PRETOKENIZERS[pretokenizer](base_spec), merges)
+    spec, _ = extend(PRETOKENIZERS[pretokenizer](base_spec, lang), merges)
     tok = PreTrainedTokenizerFast(tokenizer_object=_tokenizer(spec))
     tok.save_pretrained(str(out_dir))
     return out_dir
@@ -263,7 +322,7 @@ def load_merges(path: str | Path) -> list[tuple[str, str]]:
     return [tuple(t["merge"]) for t in data["new_tokens"]]
 
 
-def run(cfg: dict, langs: list[str]) -> None:
+def run(cfg: dict, langs: list[str], force: bool = False) -> None:
     base_spec = load_base_spec(cfg["base"]["tokenizer_id"])
     n_max = max(cfg["n_new_tokens"])
     for lang in langs:
@@ -271,7 +330,11 @@ def run(cfg: dict, langs: list[str]) -> None:
         path = corpus.fetch(lang, source, cfg["corpus"]["max_chars"], cfg["corpus"]["cache_dir"])
         print(f"{lang}: corpus {path}", flush=True)
         for name in cfg["pretokenizers"]:
-            spec = PRETOKENIZERS[name](base_spec)
+            out = merges_path(cfg["output"]["results_dir"], lang, name)
+            if out.exists() and not force:
+                print(f"  {name}: {out} exists, skipping (--force to relearn)", flush=True)
+                continue
+            spec = PRETOKENIZERS[name](base_spec, lang)
             print(f"  {name}: counting chunks ...", flush=True)
             chunks = count_chunks(corpus.read_lines(path), spec)
             words = segment(chunks, spec)
@@ -291,7 +354,6 @@ def run(cfg: dict, langs: list[str]) -> None:
                 }
                 for new_id, (a, b) in zip(new_ids, merges, strict=True)
             ]
-            out = merges_path(cfg["output"]["results_dir"], lang, name)
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_text(json.dumps({
                 "base": cfg["base"]["tokenizer_id"],
@@ -307,9 +369,10 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("--config", default="configs/vocab.yaml")
     ap.add_argument("--lang", action="append", help="limit to these languages (repeatable)")
+    ap.add_argument("--force", action="store_true", help="relearn merges that already exist")
     args = ap.parse_args(argv)
     cfg = yaml.safe_load(Path(args.config).read_text(encoding="utf-8"))
-    run(cfg, args.lang or cfg["languages"])
+    run(cfg, args.lang or cfg["languages"], force=args.force)
     return 0
 
 

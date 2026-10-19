@@ -62,7 +62,7 @@ def build_sweep(cfg: dict, lang: str) -> list[dict]:
         for n in [0, *cfg["n_new_tokens"]]:
             out = Path(cfg["output"]["tokenizer_dir"]) / lang / name / str(n)
             if not (out / "tokenizer.json").exists():
-                continue_bpe.build_tokenizer(base_spec, name, merges[:n], out)
+                continue_bpe.build_tokenizer(base_spec, name, lang, merges[:n], out)
             points.append({"lang": lang, "pretokenizer": name, "n_new": min(n, len(merges)),
                            "tokenizer_id": str(out)})
     return points
