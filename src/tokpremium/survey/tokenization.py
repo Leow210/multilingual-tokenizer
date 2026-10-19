@@ -109,7 +109,9 @@ def _subchar_vocab_mask(tokenizer_id: str) -> frozenset[int]:
     """
     tok = load_tokenizer(tokenizer_id)
     bad: set[int] = set()
-    vocab_size = getattr(tok, "vocab_size", None) or len(tok)
+    # len(tok) counts added tokens; vocab_size does not. An extended tokenizer
+    # keeps its ids contiguous, so scanning only vocab_size would skip the top.
+    vocab_size = max(getattr(tok, "vocab_size", None) or 0, len(tok))
     for i in range(vocab_size):
         try:
             s = tok.decode([i])
